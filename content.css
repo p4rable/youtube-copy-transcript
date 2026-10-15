@@ -98,14 +98,17 @@ html[dark] .ct-toast {
   .ct-toast, .ct-toast.ct-on { transform: none; transition: opacity 0.01s; }
 }
 
-/* While copying, any panel YouTube opens is laid out off-screen, so the page does not move. */
+/* While copying, any panel YouTube opens floats invisibly over the page instead of taking space in it, so the
+   page does not move. It stays inside the viewport: lists that render their rows only when on screen still do. */
 html.ct-busy ytd-engagement-panel-section-list-renderer:not([ct-keep]) {
   position: fixed !important;
   top: 0 !important;
-  left: -10000px !important;
+  left: 0 !important;
   width: 400px !important;
   height: 100vh !important;
-  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: -1 !important;
 }
 
 .ct-copy { position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

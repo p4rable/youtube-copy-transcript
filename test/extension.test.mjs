@@ -63,7 +63,7 @@ test('button sits right after Share and only on watch pages', async () => {
   await page.close();
 });
 
-test('classic markup: copies title, link and flowing text; panel stays off-screen and closes', async () => {
+test('classic markup: copies title, link and flowing text; panel stays invisible and closes', async () => {
   const page = await open('classic');
   await page.evaluate(() => navigator.clipboard.writeText('sentinel'));
   const t0 = Date.now();
@@ -74,7 +74,8 @@ test('classic markup: copies title, link and flowing text; panel stays off-scree
   const log = await fx(page);
   assert.equal(log.showClicks, 1);
   assert.equal(log.closeClicks, 1);
-  assert.ok(log.renders[0].panelRight <= 0, 'panel rendered off-screen');
+  assert.equal(log.renders[0].panelOpacity, '0', 'panel invisible while it loads');
+  assert.equal(log.renders[0].panelPosition, 'fixed', 'panel out of the page flow');
   assert.equal(log.renders[0].relatedTop, log.relatedTopBefore, 'page did not move');
   assert.equal(await page.$eval(
     'ytd-engagement-panel-section-list-renderer', (p) => p.getAttribute('visibility')), 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
@@ -170,6 +171,91 @@ test('tabbed panel in another language: still switches to the transcript tab', a
   await page.close();
 });
 
+// The 2026 "In this video" panel: Show transcript can open it on Timeline, so the Transcript chip must be
+// picked. Chip names are localized; in Thai the English name matches nothing.
+for (const [hl, name] of [['', 'English'], ['th', 'Thai']]) {
+  test(`"In this video" panel (Timeline / Chapters / Transcript), ${name} interface: picks the Transcript chip`, async () => {
+    const page = await open(`consolidated${hl && `&hl=${hl}`}`);
+    const t0 = Date.now();
+    await page.click('.ct-btn');
+    assert.deepEqual(await toast(page), ['Transcript copied', '400 words']);
+    const ms = Date.now() - t0;
+    assert.equal(await clipboard(page), expected('vid1', 40));
+    assert.equal((await fx(page)).chipClicks, 1);
+    assert.ok(ms < 2000, `took ${ms} ms`);
+    await settled(page);
+    await page.close();
+  });
+}
+
+test('Thai transcript: copied exactly, words counted the Thai way', async () => {
+  const page = await open('consolidated&hl=th&lines=th');
+  await page.click('.ct-btn');
+  const [msg, meta] = await toast(page);
+  const lines = Array.from({ length: 40 }, (_, i) => `บรรทัดที่ ${i + 1} ของ vid1: สายเคเบิล ห้อยเป็นเส้นโค้ง`);
+  const body = lines.join(' ');
+  assert.equal(await clipboard(page), `${TITLE}\nhttps://www.youtube.com/watch?v=vid1\n\n${body}`);
+  const words = await page.evaluate((t) =>   // Chromium's own Thai word segmentation, as the extension uses
+    [...new Intl.Segmenter(undefined, { granularity: 'word' }).segment(t)].filter((w) => w.isWordLike).length, body);
+  assert.ok(words > 40 * 4, `segmented into ${words} words`);
+  assert.deepEqual([msg, meta], ['Transcript copied', `${words.toLocaleString('en-US')} words`]);
+  await page.close();
+});
+
+test('"In this video" panel already on its Transcript chip: never switches away', async () => {
+  const page = await open('consolidated&hl=th&chip=transcript');
+  await page.click('.ct-btn');
+  assert.deepEqual(await toast(page), ['Transcript copied', '400 words']);
+  assert.equal(await clipboard(page), expected('vid1', 40));
+  assert.equal((await fx(page)).chipClicks, 0);
+  await page.close();
+});
+
+test('a list that renders only when on screen still renders, unseen', async () => {
+  const page = await open('lazyview');
+  await page.click('.ct-btn');
+  assert.deepEqual(await toast(page), ['Transcript copied', '400 words']);
+  assert.equal(await clipboard(page), expected('vid1', 40));
+  const log = await fx(page);
+  assert.equal(log.renders[0].panelOpacity, '0');
+  assert.equal(log.renders[0].relatedTop, log.relatedTopBefore, 'page did not move');
+  await settled(page);
+  await page.close();
+});
+
+test('Show transcript ignoring the first click (handler not ready yet): clicks again', async () => {
+  const page = await open('late');
+  await page.click('.ct-btn');
+  assert.deepEqual(await toast(page), ['Transcript copied', '400 words']);
+  assert.equal(await clipboard(page), expected('vid1', 40));
+  const log = await fx(page);
+  assert.equal(log.ignoredClicks, 1);
+  assert.equal(log.showClicks, 1);
+  await settled(page);
+  await page.close();
+});
+
+test('transcript ending long before the video does (music outro): slow batches still all arrive', async () => {
+  const page = await open('slowbatch&dur=45:00');
+  await page.click('.ct-btn');
+  assert.deepEqual(await toast(page), ['Transcript copied', '2,000 words']);
+  assert.equal(await clipboard(page), expected('vid1', 200));
+  await page.close();
+});
+
+test('copy finishes within 300 ms of the last line appearing', async () => {
+  for (const mode of ['classic', 'modern', 'consolidated', 'consolidated&hl=th', 'incremental']) {
+    const page = await open(mode);
+    await page.click('.ct-btn');
+    await toast(page);
+    const log = await fx(page);
+    const ms = log.toasts[0] - log.lastRenderAt;
+    console.log(`  ${mode}: note shown ${ms} ms after the last line rendered`);
+    assert.ok(ms <= 300, `${mode}: ${ms} ms`);
+    await page.close();
+  }
+});
+
 test('a description the user expanded stays expanded', async () => {
   const page = await open('classic');
   await page.evaluate(() => {
@@ -245,6 +331,18 @@ test('moving to another video re-attaches the button and copies the new transcri
   await page.click('.ct-btn');
   assert.deepEqual(await toast(page), ['Transcript copied', '400 words']);
   assert.equal(await clipboard(page), expected('vid2', 40));
+  await page.close();
+});
+
+test('panel left open across navigation: copies the new video, never the old one', async () => {
+  const page = await open('open');
+  await page.waitForSelector('ytd-transcript-segment-renderer');
+  await page.evaluate(() => window.fxNavigate('vid2', 'Why suspension bridges sag on purpose', true));
+  await page.waitForFunction(() => document.querySelector('#top-level-buttons-computed + .ct-btn'));
+  await page.click('.ct-btn');
+  assert.deepEqual(await toast(page), ['Transcript copied', '400 words']);
+  assert.equal(await clipboard(page), expected('vid2', 40));
+  await settled(page);
   await page.close();
 });
 

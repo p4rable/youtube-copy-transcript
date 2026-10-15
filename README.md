@@ -24,8 +24,8 @@ The button appears in the row under any YouTube video, right after **Share**.
 YouTube now protects its caption files with a token that only its own player can create, so downloading them directly returns empty files for a growing number of videos. This extension uses YouTube's own transcript panel instead:
 
 1. It clicks YouTube's **Show transcript** control. If there isn't one, the video has no transcript.
-2. The panel opens off-screen, so the page doesn't move.
-3. It reads the lines (waiting up to 10 seconds), then closes the panel. If you already had the panel open, it reads it and leaves it open.
+2. The panel opens invisibly, floating over the page, so the page doesn't move. If it opens on Timeline or Chapters (YouTube's "In this video" panel), it switches to the Transcript chip, in any interface language.
+3. It reads the lines as soon as they stop arriving (waiting up to 10 seconds for the first one), then closes the panel. If you already had the panel open, it reads it and leaves it open. Lines still showing from a previous video are never copied.
 4. It copies the text and shows the note.
 
 ## Messages
@@ -47,7 +47,7 @@ Not supported: Shorts, embedded players, YouTube Music, and the mobile site.
 
 ## Tests
 
-End-to-end tests run real Chromium with the extension loaded, against a local copy of YouTube's page structure (classic and 2026 transcript markup, no transcript, slow or empty panel, tabbed panel (English and Thai), long transcripts that load in fast or slow batches, a description you expanded yourself, navigation between videos, clipboard refusal, dark theme).
+End-to-end tests run real Chromium with the extension loaded, against a local copy of YouTube's page structure (classic and 2026 transcript markup, no transcript, slow or empty panel, tabbed panel and the 2026 "In this video" panel (English and Thai), lists that render only on screen, a click YouTube ignores, a panel left open across navigation, long transcripts that load in fast or slow batches, a description you expanded yourself, navigation between videos, clipboard refusal, dark theme).
 
 ```
 cd test

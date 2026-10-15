@@ -6,11 +6,15 @@
 const PANEL = 'ytd-engagement-panel-section-list-renderer';
 const SEGMENT = 'ytd-transcript-segment-renderer, transcript-segment-view-model';
 const SEGMENT_TEXT = '.segment-text, span[role="text"], .ytAttributedStringHost';
-const LOAD_MS = 10000;
-const BATCH_MS = 1000;                 // how long a scrolled list may take to show its next batch
+const STAMP = '.segment-timestamp, .ytwTranscriptSegmentViewModelTimestamp';
+const LOAD_MS = 10000;                 // longest wait for the first lines
+const QUIET_MS = 1000;                 // lines stopped arriving, while the last one is far from the video's end
+const END_QUIET_MS = 150;              // ...and once it is within END_S of the end
+const END_S = 30;
 
 let running = '';                      // video id of the copy in progress
 let cache = { id: '', text: '', words: 0 };
+let stale = new WeakMap();             // lines on screen when the video changed, with their text then
 let toastTimer, placeTimer;
 
 // Screen readers hear each message through a live region that is always rendered and present before
@@ -105,12 +109,11 @@ async function deliver({ text, words }) {
 
 // Returns the transcript lines, [] if the panel never filled, or null if the video has none.
 async function readTranscript() {
-  let lines = readLines();
-  if (lines.length) return loadAll(lines);          // panel already open: read it, leave it open
+  if (segments().length) return collect();          // panel already open: read it, leave it open
 
   const kept = [...document.querySelectorAll(PANEL)].filter(shown);
   kept.forEach((p) => p.setAttribute('ct-keep', ''));
-  document.documentElement.classList.add('ct-busy');  // panels opened now stay off-screen
+  document.documentElement.classList.add('ct-busy');  // panels opened now load unseen
   let expander = null;
   try {
     let show = findShowButton();
@@ -124,14 +127,26 @@ async function readTranscript() {
       show = await waitFor(findShowButton, 1500);
       if (!show) return [];
     }
+    const start = Date.now();
+    let chip = false, again = false;
     show.click();
-    lines = await waitFor(found, 3000);
-    if (!lines) {
-      const tab = transcriptTab();                    // panels with Chapters / Transcript tabs
-      if (tab) tab.click();
-      lines = await waitFor(found, LOAD_MS - 3000);
-    }
-    return lines ? await loadAll(lines) : [];
+    const ready = await waitFor(() => {
+      if (segments().length) return true;
+      const t = Date.now() - start;
+      if (!chip && t > 300) {                         // the "In this video" panel can open on Timeline or Chapters
+        const tab = transcriptTab();
+        if (tab) {
+          tab.click();
+          chip = true;
+        }
+      }
+      if (!again && t > 2500 && ![...document.querySelectorAll(PANEL)].some((p) => shown(p) && !p.hasAttribute('ct-keep'))) {
+        again = true;                                 // nothing opened: YouTube ignored the click (handler not ready yet)
+        (findShowButton() || show).click();
+      }
+      return false;
+    }, LOAD_MS);
+    return ready ? await collect() : [];
   } finally {
     for (const p of document.querySelectorAll(PANEL)) if (shown(p) && !p.hasAttribute('ct-keep')) close(p);
     if (expander) document.querySelector('ytd-watch-metadata #collapse')?.click();
@@ -141,38 +156,66 @@ async function readTranscript() {
   }
 }
 
-function readLines() {
-  const lines = [];
-  for (const seg of document.querySelectorAll(SEGMENT)) {
-    const text = shown(seg) && seg.querySelector(SEGMENT_TEXT)?.textContent;
-    const t = text && clean(text);
-    if (t) lines.push(t);
+// Transcript lines on screen for the current video. A panel left open across navigation can still
+// show the previous video's lines; those are skipped until their text changes.
+const segments = () =>
+  [...document.querySelectorAll(SEGMENT)].filter((s) => shown(s) && !(stale.has(s) && stale.get(s) === s.textContent));
+
+const lineText = (seg) => clean(seg.querySelector(SEGMENT_TEXT)?.textContent || '');
+
+const seconds = (t) => (/^\d+(:\d+)*$/.test((t = (t || '').trim())) ? t.split(':').reduce((s, p) => s * 60 + +p, 0) : NaN);
+
+// The last line starts within END_S of the video's end (the player's own duration display; not during an ad).
+const nearEnd = (seg) => !!seg &&
+  seconds(seg.querySelector(STAMP)?.textContent) >=
+  seconds(document.querySelector('#movie_player:not(.ad-showing) .ytp-time-duration')?.textContent) - END_S;
+
+// Reads the open transcript once its lines stop arriving. They can render in chunks or load as the list
+// scrolls, so wait until none has appeared for a moment: briefly when the last line is near the end of
+// the video, longer when it is not (a slow batch may still be coming).
+async function collect() {
+  let segs = segments();
+  const box = scroller(segs[segs.length - 1]);
+  const top = box && box.scrollTop;
+  let count = 0, quietSince = 0;
+  const end = Date.now() + LOAD_MS;
+  while (Date.now() < end && videoId() === running) {
+    segs = segments();
+    if (segs.length !== count) {
+      count = segs.length;
+      quietSince = Date.now();
+      if (box) box.scrollTop = box.scrollHeight;     // lists that load more as they scroll
+    } else if (Date.now() - quietSince >= (nearEnd(segs[count - 1]) ? END_QUIET_MS : QUIET_MS)) break;
+    await sleep(50);
   }
-  return lines;
+  if (box) box.scrollTop = top;
+  return segs.map(lineText).filter(Boolean);
 }
 
-const found = () => {
-  const lines = readLines();
-  return lines.length ? lines : null;
-};
+// The scrollable list holding the lines, inside its panel.
+function scroller(seg) {
+  const panel = seg && seg.closest(PANEL);
+  let box = panel && seg.parentElement;
+  while (box && box.scrollHeight <= box.clientHeight) box = box === panel ? null : box.parentElement;
+  return box;
+}
 
 const findShowButton = () =>
   document.querySelector('ytd-video-description-transcript-section-renderer button') ||
   [...document.querySelectorAll('ytd-watch-flexy button')].find((b) =>
     /show transcript/i.test(b.getAttribute('aria-label') || b.textContent));
 
-// The tab name is only known in English; in other languages, take the one other tab of a panel opened just now.
-// (If the transcript tab is already selected and just slow, an English name says so; another language cannot.)
+// The Transcript chip of a panel the click opened (or a transcript-type panel already open), if it isn't
+// selected. Chip names are localized and only the English one is known, so otherwise take the last chip:
+// YouTube puts Transcript last (Chapters / Transcript, or Timeline / Chapters / Transcript).
 const transcriptTab = () => {
-  const tabs = [...document.querySelectorAll(`${PANEL} [role="tab"]`)].filter(shown);
-  const named = (t) => /transcript/i.test(t.textContent);
-  const picked = (t) => t.getAttribute('aria-selected') === 'true';
-  const byName = tabs.find((t) => named(t) && !picked(t));
-  if (byName) return byName;
-  const fresh = tabs.filter((t) => !t.closest('[ct-keep]'));
-  if (fresh.some((t) => named(t) && picked(t))) return undefined;  // already on the transcript: don't switch away
-  const others = fresh.filter((t) => !picked(t));
-  return others.length === 1 ? others[0] : undefined;
+  const candidate = (p) => shown(p) &&
+    (!p.hasAttribute('ct-keep') || /transcript|timeline|macro-markers/i.test(p.getAttribute('target-id')));
+  for (const panel of [...document.querySelectorAll(PANEL)].filter(candidate)) {
+    const tabs = [...panel.querySelectorAll('[role="tab"]')].filter(shown);
+    const tab = tabs.find((t) => /transcript/i.test(t.textContent)) || (tabs.length > 1 && tabs[tabs.length - 1]);
+    if (tab && tab.getAttribute('aria-selected') !== 'true') return tab;
+  }
 };
 
 function close(panel) {
@@ -181,37 +224,12 @@ function close(panel) {
   else panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
 }
 
-// Long transcripts can load in batches as the list scrolls; scroll until no new lines appear
-// within BATCH_MS (a fixed short pause would cut off a slow batch and report a partial copy).
-async function loadAll(lines) {
-  const segs = [...document.querySelectorAll(SEGMENT)].filter(shown);
-  const last = segs[segs.length - 1];
-  const panel = last && last.closest(PANEL);
-  if (!panel) return lines;
-  let box = last.parentElement;
-  while (box && box.scrollHeight <= box.clientHeight) box = box === panel ? null : box.parentElement;
-  if (!box) return lines;
-  const top = box.scrollTop;
-  for (let i = 0; i < 40; i++) {
-    box.scrollTop = box.scrollHeight;
-    const have = lines.length;
-    const more = await waitFor(() => {
-      const now = readLines();
-      return now.length > have ? now : null;
-    }, BATCH_MS);
-    if (!more) break;
-    lines = more;
-  }
-  box.scrollTop = top;
-  return lines;
-}
-
 async function waitFor(fn, ms) {
   const end = Date.now() + ms;
   for (;;) {
     const v = fn();
     if (v || Date.now() > end || videoId() !== running) return v || null;
-    await sleep(100);
+    await sleep(50);
   }
 }
 
@@ -249,5 +267,9 @@ function say(msg, meta = '', ms = 4000) {
   }, ms);
 }
 
+document.addEventListener('yt-navigate-start', () => {
+  stale = new WeakMap();
+  for (const s of document.querySelectorAll(SEGMENT)) stale.set(s, s.textContent);
+});
 document.addEventListener('yt-navigate-finish', () => place());
 place();

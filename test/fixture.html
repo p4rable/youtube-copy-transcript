@@ -37,11 +37,16 @@
 <body>
 <script>
 // Scenario comes from ?fx=: classic | modern | none | never | lazydesc | tabs | incremental | slowbatch | slow | open
-// (&hl=th shows the tab names in Thai)
+//   | consolidated (the 2026 "In this video" panel: Timeline / Chapters / Transcript chips, lines rendered in chunks)
+//   | lazyview (lines render only once the panel is on screen) | late (Show transcript ignores clicks for 1.5 s)
+// &hl=th shows chip names in Thai; &lines=th makes the transcript itself Thai; &chip=transcript opens the consolidated panel on its Transcript chip;
+// &dur=m:ss overrides the player's duration display.
 const policy = trustedTypes.createPolicy('fixture', { createHTML: (s) => s });
 const params = new URLSearchParams(location.search);
 const mode = params.get('fx') || 'classic';
-const log = (window.fx = { showClicks: 0, closeClicks: 0, expandClicks: 0, collapseClicks: 0, renders: [] });
+const log = (window.fx = { showClicks: 0, closeClicks: 0, expandClicks: 0, collapseClicks: 0, chipClicks: 0,
+  ignoredClicks: 0, renders: [], toasts: [] });
+const loadedAt = Date.now();
 let video = params.get('v');
 
 function h(tag, attrs = {}, ...kids) {
@@ -51,17 +56,25 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
-const lineText = (i) => `Line ${i + 1} of ${video}:\n  the cable  hangs in a curve.`;
+const lineText = (i) => params.get('lines') === 'th'
+  ? `บรรทัดที่ ${i + 1} ของ ${video}:\n  สายเคเบิล  ห้อยเป็นเส้นโค้ง`   // a Thai-language transcript
+  : `Line ${i + 1} of ${video}:\n  the cable  hangs in a curve.`;
 const stamp = (i) => `${Math.floor(i / 6)}:${String((i * 10) % 60).padStart(2, '0')}`;
 const batched = mode === 'incremental' || mode === 'slowbatch';
+const consolidated = mode === 'consolidated';
 const total = batched ? 200 : 40;
+const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 function segment(i) {
-  if (mode === 'modern') {
-    return h('transcript-segment-view-model', {},
+  if (mode === 'modern' || consolidated) {
+    const seg = h('transcript-segment-view-model', { class: 'ytwTranscriptSegmentViewModelHost' },
       h('div', { 'aria-hidden': 'true', class: 'ytwTranscriptSegmentViewModelTimestamp' }, stamp(i)),
       h('div', { class: 'ytwTranscriptSegmentViewModelTimestampA11yLabel sr-only' }, `${i * 10} seconds`),
       h('span', { role: 'text', class: 'ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap' }, lineText(i)));
+    if (!consolidated) return seg;
+    // Wrapped as in the live "In this video" panel (dumped 2026-09-18).
+    return h('div', {}, h('macro-markers-panel-item-view-model', { role: 'button', tabindex: '0' },
+      h('timeline-item-view-model', {}, h('div', { class: 'ytwTimelineItemViewModelContentItems' }, seg))));
   }
   return h('ytd-transcript-segment-renderer', {},
     h('div', { class: 'segment' },
@@ -81,7 +94,10 @@ function fillMenu() {
 fillMenu();
 
 const showButton = () => h('ytd-video-description-transcript-section-renderer', {},
-  h('ytd-button-renderer', {}, h('button', { class: 'pill', 'aria-label': 'Show transcript', on: openPanel }, 'Show transcript')));
+  h('ytd-button-renderer', {}, h('button', { class: 'pill', 'aria-label': 'Show transcript', on: () => {
+    if (mode === 'late' && Date.now() - loadedAt < 1500) return log.ignoredClicks++;  // handler not attached yet
+    openPanel();
+  } }, 'Show transcript')));
 const expanded = h('div', { id: 'expanded' }, 'Full description. ');
 const expander = h('ytd-text-inline-expander', { id: 'description-inline-expander' },
   h('div', {}, 'A primer on load paths. '),
@@ -97,25 +113,33 @@ const expander = h('ytd-text-inline-expander', { id: 'description-inline-expande
 if (!['none', 'lazydesc'].includes(mode)) expanded.append(showButton());
 
 const content = h('div', { id: 'content' });
-const tabs = h('div', { role: 'tablist' },
-  h('div', { role: 'tab', 'aria-selected': 'true' }, params.get('hl') === 'th' ? 'บท' : 'Chapters'),
-  h('div', { role: 'tab', 'aria-selected': 'false', on: (e) => {
-    e.target.setAttribute('aria-selected', 'true');
-    setTimeout(() => render(0, total), 150);
-  } }, params.get('hl') === 'th' ? 'ข้อความถอดเสียง' : 'Transcript'));
+const th = params.get('hl') === 'th';
+const chipNames = consolidated ? (th ? ['ไทม์ไลน์', 'บท', 'ข้อความถอดเสียง'] : ['Timeline', 'Chapters', 'Transcript'])
+  : (th ? ['บท', 'ข้อความถอดเสียง'] : ['Chapters', 'Transcript']);
+const chips = chipNames.map((name, i) =>
+  h('button', { role: 'tab', class: 'ytChipShapeButtonReset', 'aria-selected': 'false', on: () => { log.chipClicks++; selectChip(i); } }, name));
+const tabs = h('div', { role: 'tablist' }, ...chips);
+function selectChip(i, delay = 150) {
+  chips.forEach((c, j) => c.setAttribute('aria-selected', String(i === j)));
+  content.replaceChildren();
+  if (i < chips.length - 1) return content.append(h('div', { class: 'chapter-row' }, h('div', {}, '0:00'), h('div', {}, 'Intro')));
+  if (consolidated) renderChunks(delay); else setTimeout(() => render(0, total), delay);
+}
 const panel = h('ytd-engagement-panel-section-list-renderer', {
-  'target-id': mode === 'modern' ? 'PAmodern_transcript_view' : 'engagement-panel-searchable-transcript',
+  'target-id': consolidated ? 'engagement-panel-timeline-view-consolidated'
+    : mode === 'modern' ? 'PAmodern_transcript_view' : 'engagement-panel-searchable-transcript',
   visibility: 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN' },
   h('div', { id: 'header' }, h('span', {}, 'Transcript'),
     h('div', { id: 'visibility-button' }, h('button', { 'aria-label': 'Close transcript', on: () => {
       log.closeClicks++; panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
     } }, '×'))),
-  ...(mode === 'tabs' ? [tabs] : []),
+  ...(mode === 'tabs' || consolidated ? [tabs] : []),
   content);
 const related = h('div', { id: 'related' }, ...Array.from({ length: 6 }, () => h('div')));
 
 document.body.append(h('ytd-app', {}, h('ytd-watch-flexy', {},
-  h('div', { id: 'primary' }, h('div', { id: 'player' }),
+  h('div', { id: 'primary' }, h('div', { id: 'player' },
+      h('div', { id: 'movie_player' }, h('span', { class: 'ytp-time-duration' }, params.get('dur') || clock(total * 10)))),
     h('ytd-watch-metadata', {},
       h('div', { id: 'title' }, title),
       h('div', { id: 'top-row' },
@@ -133,9 +157,22 @@ function render(from, to) {
   }
   content.append(...segs);
   const r = panel.getBoundingClientRect();
+  const style = getComputedStyle(panel);
+  log.lastRenderAt = Date.now();
   log.renders.push({ count: content.querySelectorAll('ytd-transcript-segment-renderer, transcript-segment-view-model').length,
-    panelRight: r.right, panelWidth: r.width, relatedTop: related.getBoundingClientRect().top });
+    panelRight: r.right, panelWidth: r.width, relatedTop: related.getBoundingClientRect().top,
+    panelOpacity: style.opacity, panelPosition: style.position, onScreen: r.right > 0 && r.left < innerWidth });
 }
+
+// The 2026 view renders a fetched transcript in chunks, a few frames apart.
+function renderChunks(delay) {
+  for (let from = 0; from < total; from += 10) setTimeout(() => render(from, from + 10), delay + from * 4);
+}
+
+// When the extension's note appears (to time a copy from the moment the last line rendered).
+new MutationObserver((records) => {
+  for (const r of records) if (r.target.classList.contains('ct-toast') && r.target.classList.contains('ct-on')) log.toasts.push(Date.now());
+}).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
 
 if (batched) {
   content.addEventListener('scroll', () => {
@@ -152,20 +189,31 @@ function openPanel() {
   log.relatedTopBefore = related.getBoundingClientRect().top;
   content.replaceChildren();
   panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
-  if (mode === 'never' || mode === 'tabs') return;
+  if (mode === 'never') return;
+  if (mode === 'tabs' || consolidated) return params.get('chip') === 'transcript' ? selectChip(chips.length - 1, 300) : selectChip(0);
+  if (mode === 'lazyview') {                    // like a list that renders its rows once it is in view
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) { io.disconnect(); setTimeout(() => render(0, total), 100); }
+    });
+    return io.observe(content);
+  }
   setTimeout(() => render(0, batched ? 50 : total), mode === 'slow' ? 6500 : 300);
 }
 
 if (mode === 'open') openPanel();
 
-// Simulates YouTube's in-app navigation to another video.
-window.fxNavigate = (v, name) => {
+// Simulates YouTube's in-app navigation to another video. With keepPanel, an open transcript panel stays
+// open and still shows the previous video's lines until Show transcript is clicked again.
+window.fxNavigate = (v, name, keepPanel = false) => {
+  document.dispatchEvent(new CustomEvent('yt-navigate-start'));
   video = v;
   history.pushState({}, '', `/watch?v=${v}&fx=${mode}`);
   title.firstChild.textContent = name;
   fillMenu();                                   // YouTube redraws the action row
-  panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
-  content.replaceChildren();
+  if (!keepPanel) {
+    panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
+    content.replaceChildren();
+  }
   document.dispatchEvent(new CustomEvent('yt-navigate-finish'));
 };
 window.fxRedrawRow = fillMenu;
