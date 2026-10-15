@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Copy Transcript",
+  "version": "1.0.0",
+  "description": "Adds a Copy transcript button to YouTube. One click puts the video's transcript on your clipboard.",
+  "icons": { "128": "icon.png" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

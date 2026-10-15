@@ -1,0 +1,173 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="require-trusted-types-for 'script'">
+<title>Why suspension bridges sag on purpose - YouTube</title>
+<style>
+  /* A stripped-down copy of YouTube's watch page structure (as of 2026), enough to drive the extension. */
+  body { margin: 0; font: 14px Roboto, Arial, sans-serif; background: #fff; color: #0f0f0f; }
+  html[dark] body { background: #0f0f0f; color: #f1f1f1; }
+  ytd-app, ytd-watch-flexy, ytd-watch-metadata, ytd-menu-renderer, ytd-engagement-panel-section-list-renderer,
+  ytd-text-inline-expander, ytd-video-description-transcript-section-renderer { display: block; }
+  ytd-watch-flexy { display: flex; gap: 24px; padding: 24px; }
+  #primary { flex: 1; min-width: 0; }
+  #secondary { width: 402px; flex: none; }
+  #player { aspect-ratio: 16 / 9; max-height: 240px; background: #000; border-radius: 12px; }
+  h1 { font-size: 20px; margin: 12px 0; }
+  #top-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  #owner { display: flex; align-items: center; gap: 12px; }
+  ytd-menu-renderer, #top-level-buttons-computed, #flexible-item-buttons { display: flex; align-items: center; }
+  .pill { height: 36px; padding: 0 16px; margin-left: 8px; border: 0; border-radius: 18px; background: #f2f2f2; color: inherit;
+    font: 500 14px Roboto, Arial, sans-serif; }
+  html[dark] .pill { background: #272727; }
+  #top-level-buttons-computed .pill:first-child { margin-left: 0; }
+  ytd-text-inline-expander { margin-top: 12px; padding: 12px; border-radius: 12px; background: rgba(0,0,0,.05); }
+  html[dark] ytd-text-inline-expander { background: rgba(255,255,255,.1); }
+  ytd-text-inline-expander:not([is-expanded]) #expanded, ytd-text-inline-expander:not([is-expanded]) #collapse,
+  ytd-text-inline-expander[is-expanded] #expand { display: none; }
+  ytd-engagement-panel-section-list-renderer { height: 480px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 12px; display: flex; flex-direction: column; }
+  ytd-engagement-panel-section-list-renderer[visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"] { display: none; }
+  #header { display: flex; justify-content: space-between; padding: 8px 12px; }
+  #content { flex: 1; overflow-y: auto; padding: 0 12px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  #related div { height: 90px; margin-bottom: 8px; border-radius: 8px; background: rgba(0,0,0,.06); }
+</style>
+</head>
+<body>
+<script>
+// Scenario comes from ?fx=: classic | modern | none | never | lazydesc | tabs | incremental | slow | open
+const policy = trustedTypes.createPolicy('fixture', { createHTML: (s) => s });
+const params = new URLSearchParams(location.search);
+const mode = params.get('fx') || 'classic';
+const log = (window.fx = { showClicks: 0, closeClicks: 0, expandClicks: 0, collapseClicks: 0, renders: [] });
+let video = params.get('v');
+
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) k === 'on' ? el.addEventListener('click', v) : el.setAttribute(k, v);
+  el.append(...kids);
+  return el;
+}
+
+const lineText = (i) => `Line ${i + 1} of ${video}:\n  the cable  hangs in a curve.`;
+const stamp = (i) => `${Math.floor(i / 6)}:${String((i * 10) % 60).padStart(2, '0')}`;
+const total = mode === 'incremental' ? 200 : 40;
+
+function segment(i) {
+  if (mode === 'modern') {
+    return h('transcript-segment-view-model', {},
+      h('div', { 'aria-hidden': 'true', class: 'ytwTranscriptSegmentViewModelTimestamp' }, stamp(i)),
+      h('div', { class: 'ytwTranscriptSegmentViewModelTimestampA11yLabel sr-only' }, `${i * 10} seconds`),
+      h('span', { role: 'text', class: 'ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap' }, lineText(i)));
+  }
+  return h('ytd-transcript-segment-renderer', {},
+    h('div', { class: 'segment' },
+      h('div', { class: 'segment-start-offset' }, h('div', { class: 'segment-timestamp' }, stamp(i))),
+      h('yt-formatted-string', { class: 'segment-text' }, lineText(i))));
+}
+
+// ---- page ----
+const title = h('h1', {}, h('yt-formatted-string', {}, 'Why suspension bridges sag on purpose'));
+const menu = h('ytd-menu-renderer', {});
+function fillMenu() {
+  menu.replaceChildren(
+    h('div', { id: 'top-level-buttons-computed' }, h('button', { class: 'pill' }, 'Like · 4.1K'), h('button', { class: 'pill' }, 'Share')),
+    h('div', { id: 'flexible-item-buttons' }, h('button', { class: 'pill' }, 'Save')),
+    h('button', { class: 'pill', 'aria-label': 'More actions' }, '···'));
+}
+fillMenu();
+
+const showButton = () => h('ytd-video-description-transcript-section-renderer', {},
+  h('ytd-button-renderer', {}, h('button', { class: 'pill', 'aria-label': 'Show transcript', on: openPanel }, 'Show transcript')));
+const expanded = h('div', { id: 'expanded' }, 'Full description. ');
+const expander = h('ytd-text-inline-expander', { id: 'description-inline-expander' },
+  h('div', {}, 'A primer on load paths. '),
+  h('button', { id: 'expand', on: () => {
+    log.expandClicks++; expander.setAttribute('is-expanded', '');
+    if (mode === 'lazydesc') setTimeout(() => expanded.append(showButton()), 200);
+  } }, '...more'),
+  expanded,
+  h('button', { id: 'collapse', on: () => {
+    log.collapseClicks++; expander.removeAttribute('is-expanded');
+    if (mode === 'lazydesc') expanded.querySelector('ytd-video-description-transcript-section-renderer')?.remove();
+  } }, 'Show less'));
+if (!['none', 'lazydesc'].includes(mode)) expanded.append(showButton());
+
+const content = h('div', { id: 'content' });
+const tabs = h('div', { role: 'tablist' },
+  h('div', { role: 'tab', 'aria-selected': 'true' }, 'Chapters'),
+  h('div', { role: 'tab', 'aria-selected': 'false', on: (e) => {
+    e.target.setAttribute('aria-selected', 'true');
+    setTimeout(() => render(0, total), 150);
+  } }, 'Transcript'));
+const panel = h('ytd-engagement-panel-section-list-renderer', {
+  'target-id': mode === 'modern' ? 'PAmodern_transcript_view' : 'engagement-panel-searchable-transcript',
+  visibility: 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN' },
+  h('div', { id: 'header' }, h('span', {}, 'Transcript'),
+    h('div', { id: 'visibility-button' }, h('button', { 'aria-label': 'Close transcript', on: () => {
+      log.closeClicks++; panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
+    } }, '×'))),
+  ...(mode === 'tabs' ? [tabs] : []),
+  content);
+const related = h('div', { id: 'related' }, ...Array.from({ length: 6 }, () => h('div')));
+
+document.body.append(h('ytd-app', {}, h('ytd-watch-flexy', {},
+  h('div', { id: 'primary' }, h('div', { id: 'player' }),
+    h('ytd-watch-metadata', {},
+      h('div', { id: 'title' }, title),
+      h('div', { id: 'top-row' },
+        h('div', { id: 'owner' }, h('b', {}, 'Field Notes on Structures'), h('button', { class: 'pill' }, 'Subscribe')),
+        h('div', { id: 'actions' }, h('div', { id: 'actions-inner' }, h('div', { id: 'menu' }, menu)))),
+      expander)),
+  h('div', { id: 'secondary' }, h('div', { id: 'panels' }, mode === 'none' ? '' : panel), related))));
+
+// ---- transcript behaviour ----
+function render(from, to) {
+  const segs = [];
+  for (let i = from; i < to; i++) {
+    if (i === 12 && mode === 'classic') segs.push(h('ytd-transcript-section-header-renderer', {}, h('div', {}, 'Chapter 2: Tension')));
+    segs.push(segment(i));
+  }
+  content.append(...segs);
+  const r = panel.getBoundingClientRect();
+  log.renders.push({ count: content.querySelectorAll('ytd-transcript-segment-renderer, transcript-segment-view-model').length,
+    panelRight: r.right, panelWidth: r.width, relatedTop: related.getBoundingClientRect().top });
+}
+
+if (mode === 'incremental') {
+  content.addEventListener('scroll', () => {
+    const have = content.querySelectorAll('ytd-transcript-segment-renderer').length;
+    if (have < total && content.scrollTop + content.clientHeight >= content.scrollHeight - 2 && !content.dataset.loading) {
+      content.dataset.loading = '1';
+      setTimeout(() => { render(have, Math.min(have + 50, total)); delete content.dataset.loading; }, 120);
+    }
+  });
+}
+
+function openPanel() {
+  log.showClicks++;
+  log.relatedTopBefore = related.getBoundingClientRect().top;
+  content.replaceChildren();
+  panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+  if (mode === 'never' || mode === 'tabs') return;
+  setTimeout(() => render(0, mode === 'incremental' ? 50 : total), mode === 'slow' ? 6500 : 300);
+}
+
+if (mode === 'open') openPanel();
+
+// Simulates YouTube's in-app navigation to another video.
+window.fxNavigate = (v, name) => {
+  video = v;
+  history.pushState({}, '', `/watch?v=${v}&fx=${mode}`);
+  title.firstChild.textContent = name;
+  fillMenu();                                   // YouTube redraws the action row
+  panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
+  content.replaceChildren();
+  document.dispatchEvent(new CustomEvent('yt-navigate-finish'));
+};
+window.fxRedrawRow = fillMenu;
+window.fxPolicy = policy;
+</script>
+</body>
+</html>

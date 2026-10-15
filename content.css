@@ -1,0 +1,101 @@
+/* Copy Transcript. Follows YouTube's theme via html[dark]. System serif only; nothing is downloaded. */
+
+.ct-btn {
+  --ct-fg: #0f0f0f;
+  --ct-line: rgba(15, 15, 15, 0.18);
+  --ct-hover: rgba(15, 15, 15, 0.06);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  box-sizing: border-box;
+  height: 36px;
+  margin: 0 0 0 8px;
+  padding: 0 15px 0 13px;
+  border: 1px solid var(--ct-line);
+  border-radius: 18px;
+  background: transparent;
+  color: var(--ct-fg);
+  font: 500 14px/1 "Iowan Old Style", Charter, "Bitstream Charter", Georgia, serif;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.ct-btn:hover { background: var(--ct-hover); }
+.ct-btn:focus-visible { outline: 2px solid var(--ct-fg); outline-offset: 2px; }
+.ct-btn[aria-busy="true"] { opacity: 0.6; cursor: default; }
+.ct-glyph { font-size: 16px; line-height: 1; transform: translateY(-0.5px); }
+
+.ct-toast {
+  --ct-bg: #ffffff;
+  --ct-fg: #0f0f0f;
+  --ct-muted: #606060;
+  --ct-line: rgba(15, 15, 15, 0.12);
+  --ct-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  z-index: 2300;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  box-sizing: border-box;
+  max-width: calc(100vw - 48px);
+  padding: 11px 16px 12px;
+  border: 1px solid var(--ct-line);
+  border-radius: 10px;
+  background: var(--ct-bg);
+  color: var(--ct-fg);
+  box-shadow: var(--ct-shadow);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px);
+  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0s linear 0.16s;
+}
+.ct-toast.ct-on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.ct-msg { font: italic 400 15px/1.3 "Iowan Old Style", Charter, "Bitstream Charter", Georgia, serif; }
+.ct-meta {
+  font: 500 10.5px/1 Roboto, Arial, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ct-muted);
+}
+.ct-meta:empty { display: none; }
+
+html[dark] .ct-btn {
+  --ct-fg: #f1f1f1;
+  --ct-line: rgba(241, 241, 241, 0.22);
+  --ct-hover: rgba(241, 241, 241, 0.08);
+}
+html[dark] .ct-toast {
+  --ct-bg: #212121;
+  --ct-fg: #f1f1f1;
+  --ct-muted: #aaaaaa;
+  --ct-line: rgba(241, 241, 241, 0.12);
+  --ct-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ct-toast, .ct-toast.ct-on { transform: none; transition: opacity 0.01s; }
+}
+
+/* While copying, any panel YouTube opens is laid out off-screen, so the page does not move. */
+html.ct-busy ytd-engagement-panel-section-list-renderer:not([ct-keep]) {
+  position: fixed !important;
+  top: 0 !important;
+  left: -10000px !important;
+  width: 400px !important;
+  height: 100vh !important;
+  visibility: hidden !important;
+}
+
+.ct-copy { position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
