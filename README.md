@@ -35,7 +35,7 @@ YouTube now protects its caption files with a token that only its own player can
 | *Transcript copied* · N WORDS | Done. |
 | *No transcript for this video* | YouTube has no transcript for it (also live streams until they end). |
 | *Couldn't copy. Click again.* | The browser refused the clipboard (for example, the window lost focus). The text is kept, so the next click copies it instantly. |
-| *Transcript didn't load. Try again.* | The panel stayed empty for 10 seconds. |
+| *Transcript didn't load. Try again.* · STOPPED AFTER N S | The panel stayed empty (it waits up to 10 seconds), or its Show transcript control never appeared. The note says how long it waited. |
 
 ## Footprint
 
@@ -47,11 +47,12 @@ Not supported: Shorts, embedded players, YouTube Music, and the mobile site.
 
 ## Tests
 
-End-to-end tests run real Chromium with the extension loaded, against a local copy of YouTube's page structure (classic and 2026 transcript markup, no transcript, slow or empty panel, tabbed panel, long transcripts that load in batches, navigation between videos, clipboard refusal, dark theme).
+End-to-end tests run real Chromium with the extension loaded, against a local copy of YouTube's page structure (classic and 2026 transcript markup, no transcript, slow or empty panel, tabbed panel (English and Thai), long transcripts that load in fast or slow batches, a description you expanded yourself, navigation between videos, clipboard refusal, dark theme).
 
 ```
 cd test
 npm install
+npx playwright install chromium
 npm test
 ```
 

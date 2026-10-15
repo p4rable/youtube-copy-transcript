@@ -36,7 +36,8 @@
 </head>
 <body>
 <script>
-// Scenario comes from ?fx=: classic | modern | none | never | lazydesc | tabs | incremental | slow | open
+// Scenario comes from ?fx=: classic | modern | none | never | lazydesc | tabs | incremental | slowbatch | slow | open
+// (&hl=th shows the tab names in Thai)
 const policy = trustedTypes.createPolicy('fixture', { createHTML: (s) => s });
 const params = new URLSearchParams(location.search);
 const mode = params.get('fx') || 'classic';
@@ -52,7 +53,8 @@ function h(tag, attrs = {}, ...kids) {
 
 const lineText = (i) => `Line ${i + 1} of ${video}:\n  the cable  hangs in a curve.`;
 const stamp = (i) => `${Math.floor(i / 6)}:${String((i * 10) % 60).padStart(2, '0')}`;
-const total = mode === 'incremental' ? 200 : 40;
+const batched = mode === 'incremental' || mode === 'slowbatch';
+const total = batched ? 200 : 40;
 
 function segment(i) {
   if (mode === 'modern') {
@@ -96,11 +98,11 @@ if (!['none', 'lazydesc'].includes(mode)) expanded.append(showButton());
 
 const content = h('div', { id: 'content' });
 const tabs = h('div', { role: 'tablist' },
-  h('div', { role: 'tab', 'aria-selected': 'true' }, 'Chapters'),
+  h('div', { role: 'tab', 'aria-selected': 'true' }, params.get('hl') === 'th' ? 'บท' : 'Chapters'),
   h('div', { role: 'tab', 'aria-selected': 'false', on: (e) => {
     e.target.setAttribute('aria-selected', 'true');
     setTimeout(() => render(0, total), 150);
-  } }, 'Transcript'));
+  } }, params.get('hl') === 'th' ? 'ข้อความถอดเสียง' : 'Transcript'));
 const panel = h('ytd-engagement-panel-section-list-renderer', {
   'target-id': mode === 'modern' ? 'PAmodern_transcript_view' : 'engagement-panel-searchable-transcript',
   visibility: 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN' },
@@ -135,12 +137,12 @@ function render(from, to) {
     panelRight: r.right, panelWidth: r.width, relatedTop: related.getBoundingClientRect().top });
 }
 
-if (mode === 'incremental') {
+if (batched) {
   content.addEventListener('scroll', () => {
     const have = content.querySelectorAll('ytd-transcript-segment-renderer').length;
     if (have < total && content.scrollTop + content.clientHeight >= content.scrollHeight - 2 && !content.dataset.loading) {
       content.dataset.loading = '1';
-      setTimeout(() => { render(have, Math.min(have + 50, total)); delete content.dataset.loading; }, 120);
+      setTimeout(() => { render(have, Math.min(have + 50, total)); delete content.dataset.loading; }, mode === 'slowbatch' ? 600 : 120);
     }
   });
 }
@@ -151,7 +153,7 @@ function openPanel() {
   content.replaceChildren();
   panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
   if (mode === 'never' || mode === 'tabs') return;
-  setTimeout(() => render(0, mode === 'incremental' ? 50 : total), mode === 'slow' ? 6500 : 300);
+  setTimeout(() => render(0, batched ? 50 : total), mode === 'slow' ? 6500 : 300);
 }
 
 if (mode === 'open') openPanel();

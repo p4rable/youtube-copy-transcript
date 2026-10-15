@@ -7,10 +7,21 @@ const PANEL = 'ytd-engagement-panel-section-list-renderer';
 const SEGMENT = 'ytd-transcript-segment-renderer, transcript-segment-view-model';
 const SEGMENT_TEXT = '.segment-text, span[role="text"], .ytAttributedStringHost';
 const LOAD_MS = 10000;
+const BATCH_MS = 1000;                 // how long a scrolled list may take to show its next batch
 
 let running = '';                      // video id of the copy in progress
 let cache = { id: '', text: '', words: 0 };
-let toast, toastTimer, placeTimer;
+let toastTimer, placeTimer;
+
+// Screen readers hear each message through a live region that is always rendered and present before
+// the first message. The toast itself is visibility:hidden between messages, which takes it out of the
+// accessibility tree, so it cannot be the live region.
+const live = make('div', 'ct-live');
+live.setAttribute('role', 'status');
+const toast = make('div', 'ct-toast');
+toast.setAttribute('aria-hidden', 'true');
+toast.append(make('span', 'ct-msg'), make('span', 'ct-meta'));
+document.body.append(live, toast);
 
 const label = make('span', 'ct-label', 'Copy transcript');
 const glyph = make('span', 'ct-glyph', '¶');
@@ -31,6 +42,12 @@ function make(tag, cls, text) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const shown = (el) => el.getClientRects().length > 0;
+const clean = (s) => s.replace(/\s+/g, ' ').trim();
+const countWords = (s) => {
+  let n = 0;                                           // segmenter, not spaces: Thai and CJK have none between words
+  for (const w of new Intl.Segmenter(undefined, { granularity: 'word' }).segment(s)) if (w.isWordLike) n++;
+  return n;
+};
 const videoId = () => (location.pathname === '/watch' && new URLSearchParams(location.search).get('v')) || '';
 
 // The button goes right after Share. YouTube renders the row late and sometimes redraws it,
@@ -56,13 +73,16 @@ async function copy() {
   button.style.minWidth = `${button.getBoundingClientRect().width}px`;  // keep the row still while the label is shorter
   label.textContent = 'Copying…';
   button.setAttribute('aria-busy', 'true');
+  const start = Date.now();
   try {
     const lines = await readTranscript();
     if (videoId() !== id) return;      // moved on to another video; drop this copy
     if (!lines) return say('No transcript for this video');
-    if (!lines.length) return say("Transcript didn't load. Try again.", 'Stopped after 10 s');
+    if (!lines.length) {
+      return say("Transcript didn't load. Try again.", `Stopped after ${Math.round((Date.now() - start) / 1000)} s`);
+    }
     const body = lines.join(' ');
-    cache = { id, text: header(id) + body, words: body.split(' ').length };
+    cache = { id, text: header(id) + body, words: countWords(body) };
     await deliver(cache);
   } finally {
     running = '';
@@ -74,7 +94,7 @@ async function copy() {
 
 function header(id) {
   const h1 = document.querySelector('ytd-watch-metadata h1');
-  const title = (h1 ? h1.textContent : document.title.replace(/ - YouTube$/, '')).replace(/\s+/g, ' ').trim();
+  const title = clean(h1 ? h1.textContent : document.title.replace(/ - YouTube$/, ''));
   return `${title}\nhttps://www.youtube.com/watch?v=${id}\n\n`;
 }
 
@@ -96,8 +116,11 @@ async function readTranscript() {
     let show = findShowButton();
     if (!show) {
       if (!document.querySelector(`${PANEL}[target-id*="transcript" i]`)) return null;
-      expander = document.querySelector('ytd-watch-metadata #expand');  // button may sit in the collapsed description
-      if (expander) expander.click();
+      const more = document.querySelector('ytd-watch-metadata #expand');  // button may sit in the collapsed description
+      if (more && shown(more)) {                      // hidden when the description is already expanded: leave it be
+        expander = more;
+        more.click();
+      }
       show = await waitFor(findShowButton, 1500);
       if (!show) return [];
     }
@@ -121,7 +144,8 @@ async function readTranscript() {
 function readLines() {
   const lines = [];
   for (const seg of document.querySelectorAll(SEGMENT)) {
-    const t = shown(seg) && seg.querySelector(SEGMENT_TEXT)?.textContent.replace(/\s+/g, ' ').trim();
+    const text = shown(seg) && seg.querySelector(SEGMENT_TEXT)?.textContent;
+    const t = text && clean(text);
     if (t) lines.push(t);
   }
   return lines;
@@ -137,9 +161,19 @@ const findShowButton = () =>
   [...document.querySelectorAll('ytd-watch-flexy button')].find((b) =>
     /show transcript/i.test(b.getAttribute('aria-label') || b.textContent));
 
-const transcriptTab = () =>
-  [...document.querySelectorAll(`${PANEL} [role="tab"]`)].find((t) =>
-    /transcript/i.test(t.textContent) && t.getAttribute('aria-selected') !== 'true');
+// The tab name is only known in English; in other languages, take the one other tab of a panel opened just now.
+// (If the transcript tab is already selected and just slow, an English name says so; another language cannot.)
+const transcriptTab = () => {
+  const tabs = [...document.querySelectorAll(`${PANEL} [role="tab"]`)].filter(shown);
+  const named = (t) => /transcript/i.test(t.textContent);
+  const picked = (t) => t.getAttribute('aria-selected') === 'true';
+  const byName = tabs.find((t) => named(t) && !picked(t));
+  if (byName) return byName;
+  const fresh = tabs.filter((t) => !t.closest('[ct-keep]'));
+  if (fresh.some((t) => named(t) && picked(t))) return undefined;  // already on the transcript: don't switch away
+  const others = fresh.filter((t) => !picked(t));
+  return others.length === 1 ? others[0] : undefined;
+};
 
 function close(panel) {
   const x = panel.querySelector('#visibility-button button, button[aria-label*="close" i]');
@@ -147,7 +181,8 @@ function close(panel) {
   else panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
 }
 
-// Long transcripts can load in batches as the list scrolls; scroll until no new lines appear.
+// Long transcripts can load in batches as the list scrolls; scroll until no new lines appear
+// within BATCH_MS (a fixed short pause would cut off a slow batch and report a partial copy).
 async function loadAll(lines) {
   const segs = [...document.querySelectorAll(SEGMENT)].filter(shown);
   const last = segs[segs.length - 1];
@@ -159,9 +194,12 @@ async function loadAll(lines) {
   const top = box.scrollTop;
   for (let i = 0; i < 40; i++) {
     box.scrollTop = box.scrollHeight;
-    await sleep(250);
-    const more = readLines();
-    if (more.length <= lines.length) break;
+    const have = lines.length;
+    const more = await waitFor(() => {
+      const now = readLines();
+      return now.length > have ? now : null;
+    }, BATCH_MS);
+    if (!more) break;
     lines = more;
   }
   box.scrollTop = top;
@@ -196,19 +234,19 @@ async function write(text) {
 }
 
 function say(msg, meta = '', ms = 4000) {
-  if (!toast) {
-    toast = make('div', 'ct-toast');
-    toast.setAttribute('role', 'status');
-    toast.append(make('span', 'ct-msg'), make('span', 'ct-meta'));
-  }
+  const host = document.fullscreenElement || document.body;
+  if (toast.parentNode !== host) host.append(live, toast);  // move only when needed, so the live region stays put
   toast.firstChild.textContent = msg;
   toast.lastChild.textContent = meta;
-  (document.fullscreenElement || document.body).append(toast);
   toast.classList.remove('ct-on');
   void toast.offsetWidth;                              // restart the fade
   toast.classList.add('ct-on');
+  live.textContent = meta ? `${msg} ${meta}` : msg;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('ct-on'), ms);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('ct-on');
+    live.textContent = '';                             // so the same message next time is new text, and announced
+  }, ms);
 }
 
 document.addEventListener('yt-navigate-finish', () => place());

@@ -20,7 +20,7 @@ before(async () => {
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://www.youtube.com' });
   await ctx.route('https://www.youtube.com/**', (r) => r.fulfill({ contentType: 'text/html', body: fixture }));
 });
-after(async () => { await ctx.close(); });
+after(async () => { await ctx?.close(); });   // ctx is unset if the browser failed to start
 
 async function open(fx, v = 'vid1') {
   const page = await ctx.newPage();
@@ -152,6 +152,40 @@ test('long transcript that loads in batches: gets every line', async () => {
   await page.close();
 });
 
+test('batches that take over half a second still all arrive', async () => {
+  const page = await open('slowbatch');
+  await page.click('.ct-btn');
+  assert.deepEqual(await toast(page), ['Transcript copied', '2,000 words']);
+  assert.equal(await clipboard(page), expected('vid1', 200));
+  await settled(page);
+  await page.close();
+});
+
+test('tabbed panel in another language: still switches to the transcript tab', async () => {
+  const page = await open('tabs&hl=th');
+  await page.click('.ct-btn');
+  assert.deepEqual(await toast(page), ['Transcript copied', '400 words']);
+  assert.equal(await clipboard(page), expected('vid1', 40));
+  await settled(page);
+  await page.close();
+});
+
+test('a description the user expanded stays expanded', async () => {
+  const page = await open('classic');
+  await page.evaluate(() => {
+    document.querySelector('ytd-video-description-transcript-section-renderer').remove();
+    document.querySelector('#expand').click();
+  });
+  await page.click('.ct-btn');
+  assert.deepEqual(await toast(page), ["Transcript didn't load. Try again.", 'Stopped after 2 s']);
+  assert.equal(await page.$eval('ytd-text-inline-expander', (e) => e.hasAttribute('is-expanded')), true);
+  const log = await fx(page);
+  assert.equal(log.expandClicks, 1);
+  assert.equal(log.collapseClicks, 0);
+  await settled(page);
+  await page.close();
+});
+
 test('panel already open: reads it and leaves it open', async () => {
   const page = await open('open');
   await page.waitForSelector('ytd-transcript-segment-renderer');
@@ -172,8 +206,10 @@ test('panel never fills: gives up after 10 s and cleans up', async () => {
   await page.evaluate(() => navigator.clipboard.writeText('sentinel'));
   const t0 = Date.now();
   await page.click('.ct-btn');
-  assert.deepEqual(await toast(page), ["Transcript didn't load. Try again.", 'Stopped after 10 s']);
+  const [msg, meta] = await toast(page);
   const ms = Date.now() - t0;
+  assert.equal(msg, "Transcript didn't load. Try again.");
+  assert.match(meta, /^Stopped after 1[01] s$/);   // the real wait, which runs a little past 10 s
   assert.ok(ms >= 9500 && ms < 12000, `took ${ms} ms`);
   assert.equal(await clipboard(page), 'sentinel');
   assert.equal((await fx(page)).closeClicks, 1);

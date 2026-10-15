@@ -84,6 +84,16 @@ html[dark] .ct-toast {
   --ct-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
 }
 
+/* The screen-reader copy of the note: always rendered (unlike the toast), but takes no visible space. */
+.ct-live {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ct-toast, .ct-toast.ct-on { transform: none; transition: opacity 0.01s; }
 }
