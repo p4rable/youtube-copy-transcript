@@ -299,6 +299,7 @@ test('panel never fills: gives up after 10 s and cleans up', async () => {
   assert.ok(ms >= 9500 && ms < 12000, `took ${ms} ms`);
   assert.equal(await clipboard(page), 'sentinel');
   assert.equal((await fx(page)).closeClicks, 1);
+  assert.equal((await fx(page)).showClicks, 1, 'no second click once the panel opened');
   await settled(page);
   await page.close();
 });
@@ -334,17 +335,23 @@ test('moving to another video re-attaches the button and copies the new transcri
   await page.close();
 });
 
-test('panel left open across navigation: copies the new video, never the old one', async () => {
-  const page = await open('open');
-  await page.waitForSelector('ytd-transcript-segment-renderer');
-  await page.evaluate(() => window.fxNavigate('vid2', 'Why suspension bridges sag on purpose', true));
-  await page.waitForFunction(() => document.querySelector('#top-level-buttons-computed + .ct-btn'));
-  await page.click('.ct-btn');
-  assert.deepEqual(await toast(page), ['Transcript copied', '400 words']);
-  assert.equal(await clipboard(page), expected('vid2', 40));
-  await settled(page);
-  await page.close();
-});
+// With &reuse=1 the new video's lines are written into the same elements, so only their text tells old from new.
+for (const [fxMode, how] of [['open', 'new line elements'], ['open&reuse=1', 'reused line elements']]) {
+  test(`panel left open across navigation (${how}): copies the new video, never the old one`, async () => {
+    const page = await open(fxMode);
+    await page.waitForSelector('ytd-transcript-segment-renderer');
+    await page.evaluate(() => window.fxNavigate('vid2', 'Why suspension bridges sag on purpose', true));
+    await page.waitForFunction(() => document.querySelector('#top-level-buttons-computed + .ct-btn'));
+    await page.click('.ct-btn');
+    assert.deepEqual(await toast(page), ['Transcript copied', '400 words']);
+    assert.equal(await clipboard(page), expected('vid2', 40));
+    assert.equal((await fx(page)).closeClicks, 0, "the user's own panel is not closed");
+    assert.equal(await page.$eval(
+      'ytd-engagement-panel-section-list-renderer', (p) => p.getAttribute('visibility')), 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+    await settled(page);
+    await page.close();
+  });
+}
 
 test('YouTube redrawing the action row puts the button back', async () => {
   const page = await open('classic');

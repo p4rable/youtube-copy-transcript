@@ -40,7 +40,7 @@
 //   | consolidated (the 2026 "In this video" panel: Timeline / Chapters / Transcript chips, lines rendered in chunks)
 //   | lazyview (lines render only once the panel is on screen) | late (Show transcript ignores clicks for 1.5 s)
 // &hl=th shows chip names in Thai; &lines=th makes the transcript itself Thai; &chip=transcript opens the consolidated panel on its Transcript chip;
-// &dur=m:ss overrides the player's duration display.
+// &dur=m:ss overrides the player's duration display; &reuse=1 makes Show transcript refill the existing line elements.
 const policy = trustedTypes.createPolicy('fixture', { createHTML: (s) => s });
 const params = new URLSearchParams(location.search);
 const mode = params.get('fx') || 'classic';
@@ -187,10 +187,14 @@ if (batched) {
 function openPanel() {
   log.showClicks++;
   log.relatedTopBefore = related.getBoundingClientRect().top;
-  content.replaceChildren();
   panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+  const texts = content.querySelectorAll('.segment-text, span[role="text"]');
+  if (params.get('reuse') && texts.length) {    // a list that re-renders into the rows it already has
+    return setTimeout(() => { texts.forEach((el, i) => { el.textContent = lineText(i); }); log.lastRenderAt = Date.now(); }, 300);
+  }
+  content.replaceChildren();
   if (mode === 'never') return;
-  if (mode === 'tabs' || consolidated) return params.get('chip') === 'transcript' ? selectChip(chips.length - 1, 300) : selectChip(0);
+  if (mode === 'tabs' || consolidated) return params.get('chip') === 'transcript' ? selectChip(chips.length - 1, 1000) : selectChip(0);
   if (mode === 'lazyview') {                    // like a list that renders its rows once it is in view
     const io = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) { io.disconnect(); setTimeout(() => render(0, total), 100); }
